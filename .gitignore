@@ -1,0 +1,12 @@
+# Go
+/disparago
+/disparago.exe
+*.exe
+*.test
+*.out
+*.log
+
+# Web
+web/node_modules/
+web/dist/
+.env

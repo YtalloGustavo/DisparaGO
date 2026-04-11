@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { LayoutDashboard, Settings, LogOut } from "lucide-react";
 
 const POLL_INTERVAL_MS = 8000;
 const AUTH_STORAGE_KEY = "disparago.auth";
@@ -594,54 +595,71 @@ function App() {
   }
 
   return (
-    <div className="shell">
-      <section className="hero">
-        <div className="panel hero-card">
-          <div className="eyebrow">Disparador operacional</div>
-          <h1>DisparaGO</h1>
-          <p>
-            Um painel mais simples para criar campanhas, acompanhar entregas e ajustar o
-            envio com seguranca.
-          </p>
+    <div className="dashboard-layout">
+      <aside className="sidebar">
+        <div className="brand">
+          Dispara<span>GO</span>
         </div>
+        <nav className="nav-menu">
+          <div className="nav-group">Atendimento & Operação</div>
+          <button
+            className={`nav-item ${activeView === "operations" ? "active" : ""}`}
+            onClick={() => setActiveView("operations")}
+          >
+            <LayoutDashboard size={20} />
+            <span>Operação Diária</span>
+          </button>
+          {isSuperadmin ? (
+            <>
+              <div className="nav-group">Gerência</div>
+              <button
+                className={`nav-item ${activeView === "settings" ? "active" : ""}`}
+                onClick={() => setActiveView("settings")}
+              >
+                <Settings size={20} />
+                <span>Configuração de Instância</span>
+              </button>
+            </>
+          ) : null}
+        </nav>
+      </aside>
 
-        <div className="panel hero-card side">
-          <div className="session-bar">
-            <div>
-              <div className="session-label">Sessao ativa</div>
-              <strong>{session.username}</strong>
-              <div className="muted small">Expira em {formatDate(session.expiresAt)}</div>
+      <div className="main-area">
+        <header className="topbar">
+          <div className="topbar-welcome">Dashboard Operacional</div>
+          <div className="topbar-actions">
+            <div className="user-profile">
+              <div className="user-info">
+                <strong>{session.username}</strong>
+                <span>Expira em {formatDate(session.expiresAt)}</span>
+              </div>
             </div>
-            <button className="ghost-btn" onClick={() => applyLogout("Sessao encerrada.")}>
-              Sair
+            <button className="logout-btn" onClick={() => applyLogout("Sessão encerrada.")}>
+              <LogOut size={18} />
+              <span>Sair</span>
             </button>
           </div>
+        </header>
 
-          <div className="stats-grid">
-            <StatCard label="Campanhas" value={stats.total} />
-            <StatCard label="Ativas" value={stats.active} />
-            <StatCard label="Enviadas" value={stats.sent} />
-            <StatCard label="Falhas" value={stats.failed} />
-          </div>
-        </div>
-      </section>
+        <main className="content">
+          <section className="hero">
+            <div className="panel hero-card hero-main">
+              <div className="eyebrow">Disparador operacional</div>
+              <h1>DisparaGO</h1>
+              <p>
+                Um painel mais simples para criar campanhas, acompanhar entregas e ajustar o envio com segurança.
+              </p>
+            </div>
 
-      <section className="view-switch">
-        <button
-          className={`view-tab ${activeView === "operations" ? "active" : ""}`}
-          onClick={() => setActiveView("operations")}
-        >
-          Operacao diaria
-        </button>
-        {isSuperadmin ? (
-          <button
-            className={`view-tab ${activeView === "settings" ? "active" : ""}`}
-            onClick={() => setActiveView("settings")}
-          >
-            Configuracoes da instancia
-          </button>
-        ) : null}
-      </section>
+            <div className="panel hero-card side">
+              <div className="stats-grid" style={{ marginTop: 0 }}>
+                <StatCard label="Campanhas" value={stats.total} />
+                <StatCard label="Ativas" value={stats.active} />
+                <StatCard label="Enviadas" value={stats.sent} />
+                <StatCard label="Falhas" value={stats.failed} />
+              </div>
+            </div>
+          </section>
 
       {activeView === "operations" ? (
         <>
@@ -1124,6 +1142,8 @@ function App() {
         </div>
       </section>
       ) : null}
+        </main>
+      </div>
     </div>
   );
 }
