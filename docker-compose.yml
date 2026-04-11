@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: disparago-postgres
+    environment:
+      POSTGRES_DB: disparago
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/000001_init.sql:/docker-entrypoint-initdb.d/000001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d disparago"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: disparago-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: disparago-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_NAME: DisparaGO
+      APP_ENV: docker
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8080
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8080}
+      APP_READ_TIMEOUT: 15
+      APP_WRITE_TIMEOUT: 15
+      APP_SHUTDOWN_TIMEOUT: 10
+      LOG_LEVEL: info
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-change-me}
+      SUPERADMIN_USERNAME: ${SUPERADMIN_USERNAME:-superadmin}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-change-me-superadmin}
+      AUTH_SECRET: ${AUTH_SECRET:-change-this-secret}
+      AUTH_TOKEN_TTL_HOURS: ${AUTH_TOKEN_TTL_HOURS:-12}
+      HUMANIZER_ENABLED: ${HUMANIZER_ENABLED:-true}
+      HUMANIZER_INITIAL_DELAY_MIN_SECONDS: ${HUMANIZER_INITIAL_DELAY_MIN_SECONDS:-3}
+      HUMANIZER_INITIAL_DELAY_MAX_SECONDS: ${HUMANIZER_INITIAL_DELAY_MAX_SECONDS:-8}
+      HUMANIZER_BASE_DELAY_MIN_SECONDS: ${HUMANIZER_BASE_DELAY_MIN_SECONDS:-9}
+      HUMANIZER_BASE_DELAY_MAX_SECONDS: ${HUMANIZER_BASE_DELAY_MAX_SECONDS:-18}
+      HUMANIZER_PROVIDER_DELAY_MIN_MS: ${HUMANIZER_PROVIDER_DELAY_MIN_MS:-1500}
+      HUMANIZER_PROVIDER_DELAY_MAX_MS: ${HUMANIZER_PROVIDER_DELAY_MAX_MS:-5000}
+      HUMANIZER_BURST_SIZE_MIN: ${HUMANIZER_BURST_SIZE_MIN:-4}
+      HUMANIZER_BURST_SIZE_MAX: ${HUMANIZER_BURST_SIZE_MAX:-8}
+      HUMANIZER_BURST_PAUSE_MIN_SECONDS: ${HUMANIZER_BURST_PAUSE_MIN_SECONDS:-45}
+      HUMANIZER_BURST_PAUSE_MAX_SECONDS: ${HUMANIZER_BURST_PAUSE_MAX_SECONDS:-120}
+      WEBHOOK_TOKEN_SECRET: ${WEBHOOK_TOKEN_SECRET:-change-this-webhook-secret}
+      WEBHOOK_DEFAULT_SUBSCRIPTIONS: ${WEBHOOK_DEFAULT_SUBSCRIPTIONS:-ALL}
+      RETRY_MAX_ATTEMPTS: 3
+      RETRY_DELAY_SECONDS: 15
+      POSTGRES_URL: postgres://postgres:postgres@postgres:5432/disparago?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      REDIS_QUEUE_CAMPAIGN_MESSAGES: queue:campaign-messages
+      EVOLUTIONGO_BASE_URL: ${EVOLUTIONGO_BASE_URL:-http://host.docker.internal:8081}
+      EVOLUTIONGO_API_KEY: ${EVOLUTIONGO_API_KEY:-change-me}
+      EVOLUTIONGO_TIMEOUT: 30
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
