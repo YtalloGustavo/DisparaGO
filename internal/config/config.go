@@ -13,10 +13,12 @@ import (
 type Config struct {
 	App         AppConfig
 	Auth        AuthConfig
+	InternalAPI InternalAPIConfig
 	Humanizer   HumanizerConfig
 	Webhook     WebhookConfig
 	Log         LogConfig
 	Retry       RetryConfig
+	Scheduler   SchedulerConfig
 	Postgres    PostgresConfig
 	Redis       RedisConfig
 	EvolutionGO EvolutionGOConfig
@@ -38,12 +40,19 @@ type LogConfig struct {
 }
 
 type AuthConfig struct {
-	OperatorUsername   string
-	OperatorPassword   string
-	SuperadminUsername string
-	SuperadminPassword string
-	Secret             string
-	TokenTTL           time.Duration
+	BootstrapCompanyName  string
+	OperatorUsername      string
+	OperatorPassword      string
+	OperatorDisplayName   string
+	SuperadminUsername    string
+	SuperadminPassword    string
+	SuperadminDisplayName string
+	Secret                string
+	TokenTTL              time.Duration
+}
+
+type InternalAPIConfig struct {
+	Key string
 }
 
 type HumanizerConfig struct {
@@ -68,6 +77,11 @@ type WebhookConfig struct {
 type RetryConfig struct {
 	MaxAttempts int
 	Delay       time.Duration
+}
+
+type SchedulerConfig struct {
+	PollInterval time.Duration
+	BatchSize    int
 }
 
 type PostgresConfig struct {
@@ -100,12 +114,18 @@ func Load() (Config, error) {
 			ShutdownTimeout: getEnvDurationSeconds("APP_SHUTDOWN_TIMEOUT", 10),
 		},
 		Auth: AuthConfig{
-			OperatorUsername:   getEnv("AUTH_USERNAME", "admin"),
-			OperatorPassword:   getEnv("AUTH_PASSWORD", "change-me"),
-			SuperadminUsername: getEnv("SUPERADMIN_USERNAME", "superadmin"),
-			SuperadminPassword: getEnv("SUPERADMIN_PASSWORD", "change-me-superadmin"),
-			Secret:             getEnv("AUTH_SECRET", "disparago-dev-secret"),
-			TokenTTL:           getEnvDurationHours("AUTH_TOKEN_TTL_HOURS", 12),
+			BootstrapCompanyName:  getEnv("AUTH_BOOTSTRAP_COMPANY_NAME", "Default Company"),
+			OperatorUsername:      getEnv("AUTH_USERNAME", "admin"),
+			OperatorPassword:      getEnv("AUTH_PASSWORD", "change-me"),
+			OperatorDisplayName:   getEnv("AUTH_DISPLAY_NAME", "Operator"),
+			SuperadminUsername:    getEnv("SUPERADMIN_USERNAME", "superadmin"),
+			SuperadminPassword:    getEnv("SUPERADMIN_PASSWORD", "change-me-superadmin"),
+			SuperadminDisplayName: getEnv("SUPERADMIN_DISPLAY_NAME", "Superadmin"),
+			Secret:                getEnv("AUTH_SECRET", "disparago-dev-secret"),
+			TokenTTL:              getEnvDurationHours("AUTH_TOKEN_TTL_HOURS", 12),
+		},
+		InternalAPI: InternalAPIConfig{
+			Key: getEnv("INTERNAL_API_KEY", ""),
 		},
 		Humanizer: HumanizerConfig{
 			Enabled:          getEnvBool("HUMANIZER_ENABLED", true),
@@ -130,6 +150,10 @@ func Load() (Config, error) {
 		Retry: RetryConfig{
 			MaxAttempts: getEnvInt("RETRY_MAX_ATTEMPTS", 3),
 			Delay:       getEnvDurationSeconds("RETRY_DELAY_SECONDS", 15),
+		},
+		Scheduler: SchedulerConfig{
+			PollInterval: getEnvDurationSeconds("SCHEDULER_POLL_INTERVAL_SECONDS", 30),
+			BatchSize:    getEnvInt("SCHEDULER_BATCH_SIZE", 25),
 		},
 		Postgres: PostgresConfig{
 			URL: getEnv("POSTGRES_URL", ""),

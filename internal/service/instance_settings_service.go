@@ -38,25 +38,25 @@ func NewInstanceSettingsService(
 	}
 }
 
-func (s *InstanceSettingsService) Get(ctx context.Context, instanceID string) (instancecfg.Settings, error) {
+func (s *InstanceSettingsService) Get(ctx context.Context, companyID int64, instanceID string) (instancecfg.Settings, error) {
 	instanceID = strings.TrimSpace(instanceID)
-	if instanceID == "" {
-		return instancecfg.Settings{}, fmt.Errorf("%w: instance_id is required", ErrInvalidInstanceSettings)
+	if companyID <= 0 || instanceID == "" {
+		return instancecfg.Settings{}, fmt.Errorf("%w: company_id and instance_id are required", ErrInvalidInstanceSettings)
 	}
 
-	item, err := s.repository.GetByInstanceID(ctx, instanceID)
+	item, err := s.repository.Get(ctx, companyID, instanceID)
 	if err != nil {
 		if !errors.Is(err, repository.ErrInstanceSettingsNotFound) {
 			return instancecfg.Settings{}, err
 		}
-		item = s.defaultSettings(instanceID)
+		item = s.defaultSettings(companyID, instanceID)
 	}
 
 	return s.enrich(item), nil
 }
 
-func (s *InstanceSettingsService) List(ctx context.Context) ([]instancecfg.Settings, error) {
-	items, err := s.repository.List(ctx)
+func (s *InstanceSettingsService) ListByCompany(ctx context.Context, companyID int64) ([]instancecfg.Settings, error) {
+	items, err := s.repository.ListByCompany(ctx, companyID)
 	if err != nil {
 		return nil, err
 	}
@@ -65,16 +65,14 @@ func (s *InstanceSettingsService) List(ctx context.Context) ([]instancecfg.Setti
 	for _, item := range items {
 		enriched = append(enriched, s.enrich(item))
 	}
-
 	return enriched, nil
 }
 
 func (s *InstanceSettingsService) Save(ctx context.Context, item instancecfg.Settings) (instancecfg.Settings, error) {
 	item.InstanceID = strings.TrimSpace(item.InstanceID)
-	if item.InstanceID == "" {
-		return instancecfg.Settings{}, fmt.Errorf("%w: instance_id is required", ErrInvalidInstanceSettings)
+	if item.CompanyID <= 0 || item.InstanceID == "" {
+		return instancecfg.Settings{}, fmt.Errorf("%w: company_id and instance_id are required", ErrInvalidInstanceSettings)
 	}
-
 	if err := s.validate(&item); err != nil {
 		return instancecfg.Settings{}, err
 	}
@@ -83,12 +81,11 @@ func (s *InstanceSettingsService) Save(ctx context.Context, item instancecfg.Set
 	if err != nil {
 		return instancecfg.Settings{}, err
 	}
-
 	return s.enrich(saved), nil
 }
 
-func (s *InstanceSettingsService) HumanizerConfig(ctx context.Context, instanceID string) (config.HumanizerConfig, error) {
-	item, err := s.Get(ctx, instanceID)
+func (s *InstanceSettingsService) HumanizerConfig(ctx context.Context, companyID int64, instanceID string) (config.HumanizerConfig, error) {
+	item, err := s.Get(ctx, companyID, instanceID)
 	if err != nil {
 		return config.HumanizerConfig{}, err
 	}
@@ -108,26 +105,24 @@ func (s *InstanceSettingsService) HumanizerConfig(ctx context.Context, instanceI
 	}, nil
 }
 
-func (s *InstanceSettingsService) ValidateWebhookToken(ctx context.Context, instanceID, token string) error {
-	settings, err := s.Get(ctx, instanceID)
+func (s *InstanceSettingsService) ValidateWebhookToken(ctx context.Context, companyID int64, instanceID, token string) error {
+	settings, err := s.Get(ctx, companyID, instanceID)
 	if err != nil {
 		return err
 	}
-
 	if !settings.WebhookEnabled {
 		return fmt.Errorf("%w: webhook is disabled for instance", ErrInvalidInstanceSettings)
 	}
-
 	if !hmac.Equal([]byte(settings.WebhookToken), []byte(strings.TrimSpace(token))) {
 		return ErrInvalidToken
 	}
-
 	return nil
 }
 
-func (s *InstanceSettingsService) defaultSettings(instanceID string) instancecfg.Settings {
+func (s *InstanceSettingsService) defaultSettings(companyID int64, instanceID string) instancecfg.Settings {
 	now := time.Now().UTC()
 	return instancecfg.Settings{
+		CompanyID:            companyID,
 		InstanceID:           instanceID,
 		HumanizerEnabled:     s.humanizer.Enabled,
 		InitialDelayMinSec:   int(s.humanizer.InitialDelayMin / time.Second),
@@ -148,21 +143,25 @@ func (s *InstanceSettingsService) defaultSettings(instanceID string) instancecfg
 }
 
 func (s *InstanceSettingsService) enrich(item instancecfg.Settings) instancecfg.Settings {
-	item.WebhookToken = s.webhookToken(item.InstanceID)
+	item.WebhookToken = s.webhookToken(item.CompanyID, item.InstanceID)
 	if s.app.PublicURL != "" {
-		item.WebhookURL = fmt.Sprintf("%s/api/v1/webhooks/evolution/%s?token=%s", s.app.PublicURL, item.InstanceID, item.WebhookToken)
+		item.WebhookURL = fmt.Sprintf(
+			"%s/api/v1/webhooks/evolution/%d/%s?token=%s",
+			s.app.PublicURL,
+			item.CompanyID,
+			item.InstanceID,
+			item.WebhookToken,
+		)
 	}
-
 	if len(item.WebhookSubscriptions) == 0 {
 		item.WebhookSubscriptions = append([]string(nil), s.webhook.DefaultSubscriptions...)
 	}
-
 	return item
 }
 
-func (s *InstanceSettingsService) webhookToken(instanceID string) string {
+func (s *InstanceSettingsService) webhookToken(companyID int64, instanceID string) string {
 	mac := hmac.New(sha256.New, []byte(s.webhook.TokenSecret))
-	_, _ = mac.Write([]byte(instanceID))
+	_, _ = mac.Write([]byte(fmt.Sprintf("%d:%s", companyID, instanceID)))
 	return hex.EncodeToString(mac.Sum(nil))[:32]
 }
 
@@ -192,6 +191,5 @@ func (s *InstanceSettingsService) validate(item *instancecfg.Settings) error {
 		subscriptions = append([]string(nil), s.webhook.DefaultSubscriptions...)
 	}
 	item.WebhookSubscriptions = subscriptions
-
 	return nil
 }

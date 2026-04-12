@@ -126,9 +126,14 @@ func (w *DispatchWorker) handleJob(ctx context.Context, raw string, job queue.Ca
 		return nil
 	}
 
-	campaignItem, err := w.repository.GetByID(ctx, item.CampaignID)
+	campaignItem, err := w.repository.GetByID(ctx, 0, item.CampaignID, true)
 	if err != nil {
 		return err
+	}
+
+	if campaignItem.Status == "scheduled" {
+		w.log.Printf("worker skipping scheduled campaign message: campaign_id=%s message_id=%s", item.CampaignID, item.ID)
+		return nil
 	}
 
 	if campaignItem.Paused || campaignItem.Status == "paused" {
@@ -147,7 +152,7 @@ func (w *DispatchWorker) handleJob(ctx context.Context, raw string, job queue.Ca
 		w.log.Printf("worker recalculate campaign after processing failed: campaign_id=%s err=%v", item.CampaignID, err)
 	}
 
-	providerDelay, waitApplied, err := w.waitForHumanCadence(ctx, job.InstanceID)
+	providerDelay, waitApplied, err := w.waitForHumanCadence(ctx, campaignItem.CompanyID, job.InstanceID)
 	if err != nil {
 		return err
 	}
@@ -238,10 +243,10 @@ func (w *DispatchWorker) shouldRetry(err error, attempt int) bool {
 	}
 }
 
-func (w *DispatchWorker) waitForHumanCadence(ctx context.Context, instanceID string) (int, time.Duration, error) {
+func (w *DispatchWorker) waitForHumanCadence(ctx context.Context, companyID int64, instanceID string) (int, time.Duration, error) {
 	humanizerCfg := w.humanizer
 	if w.settings != nil {
-		if item, err := w.settings.HumanizerConfig(ctx, instanceID); err == nil {
+		if item, err := w.settings.HumanizerConfig(ctx, companyID, instanceID); err == nil {
 			humanizerCfg = item
 		}
 	}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -18,7 +19,12 @@ func NewInstanceSettingsHandler(service *service.InstanceSettingsService) *Insta
 }
 
 func (h *InstanceSettingsHandler) List(c *fiber.Ctx) error {
-	items, err := h.service.List(c.UserContext())
+	companyID, err := strconv.ParseInt(c.Params("companyID"), 10, 64)
+	if err != nil || companyID <= 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid company id"})
+	}
+
+	items, err := h.service.ListByCompany(c.UserContext(), companyID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -27,7 +33,12 @@ func (h *InstanceSettingsHandler) List(c *fiber.Ctx) error {
 }
 
 func (h *InstanceSettingsHandler) Show(c *fiber.Ctx) error {
-	item, err := h.service.Get(c.UserContext(), c.Params("instanceID"))
+	companyID, parseErr := strconv.ParseInt(c.Params("companyID"), 10, 64)
+	if parseErr != nil || companyID <= 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid company id"})
+	}
+
+	item, err := h.service.Get(c.UserContext(), companyID, c.Params("instanceID"))
 	if err != nil {
 		status := fiber.StatusInternalServerError
 		if errors.Is(err, service.ErrInvalidInstanceSettings) {
@@ -45,6 +56,12 @@ func (h *InstanceSettingsHandler) Upsert(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
+	companyID, parseErr := strconv.ParseInt(c.Params("companyID"), 10, 64)
+	if parseErr != nil || companyID <= 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid company id"})
+	}
+
+	req.CompanyID = companyID
 	req.InstanceID = c.Params("instanceID")
 
 	item, err := h.service.Save(c.UserContext(), req)

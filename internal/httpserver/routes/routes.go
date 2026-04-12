@@ -10,9 +10,11 @@ import (
 
 func Register(
 	app *fiber.App,
+	internalAPIKey string,
 	authService *service.AuthService,
 	healthHandler *handlers.HealthHandler,
 	authHandler *handlers.AuthHandler,
+	integrationHandler *handlers.IntegrationHandler,
 	campaignHandler *handlers.CampaignHandler,
 	instanceSettingsHandler *handlers.InstanceSettingsHandler,
 	webhookHandler *handlers.WebhookHandler,
@@ -30,7 +32,14 @@ func Register(
 
 	api.Post("/auth/login", authHandler.Login)
 	api.Post("/webhooks/evolution", webhookHandler.Evolution)
-	api.Post("/webhooks/evolution/:instanceID", webhookHandler.EvolutionForInstance)
+	api.Post("/webhooks/evolution/:companyID/:instanceID", webhookHandler.EvolutionForInstance)
+
+	internal := app.Group("/api/internal", middleware.InternalKey(internalAPIKey))
+	internal.Put("/companies", integrationHandler.UpsertCompany)
+	internal.Put("/users", integrationHandler.UpsertUser)
+	internal.Post("/campaigns", integrationHandler.CreateOrUpdateCampaign)
+	internal.Post("/campaigns/:id/reschedule", integrationHandler.RescheduleCampaign)
+	internal.Post("/campaigns/:id/cancel", integrationHandler.CancelCampaign)
 
 	protected := api.Group("/", middleware.Protected(authService))
 	protected.Get("/auth/me", authHandler.Me)
@@ -40,11 +49,13 @@ func Register(
 	protected.Get("/campaigns/:id/messages", campaignHandler.ListMessages)
 	protected.Post("/campaigns/:id/pause", campaignHandler.Pause)
 	protected.Post("/campaigns/:id/resume", campaignHandler.Resume)
+	protected.Post("/campaigns/:id/reschedule", campaignHandler.Reschedule)
+	protected.Post("/campaigns/:id/cancel", campaignHandler.CancelScheduled)
 
 	superadmin := protected.Group("/admin", middleware.RequireRole("superadmin"))
-	superadmin.Get("/instances/settings", instanceSettingsHandler.List)
-	superadmin.Get("/instances/:instanceID/settings", instanceSettingsHandler.Show)
-	superadmin.Put("/instances/:instanceID/settings", instanceSettingsHandler.Upsert)
+	superadmin.Get("/companies/:companyID/instances/settings", instanceSettingsHandler.List)
+	superadmin.Get("/companies/:companyID/instances/:instanceID/settings", instanceSettingsHandler.Show)
+	superadmin.Put("/companies/:companyID/instances/:instanceID/settings", instanceSettingsHandler.Upsert)
 
 	app.Get("/", dashboardHandler.Index)
 	app.Get("/dashboard", dashboardHandler.Index)

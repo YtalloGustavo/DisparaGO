@@ -3,6 +3,7 @@ package instance
 import "time"
 
 type Settings struct {
+	CompanyID            int64     `json:"company_id"`
 	InstanceID           string    `json:"instance_id"`
 	HumanizerEnabled     bool      `json:"humanizer_enabled"`
 	InitialDelayMinSec   int       `json:"initial_delay_min_seconds"`

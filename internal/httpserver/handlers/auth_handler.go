@@ -5,6 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	authdomain "disparago/internal/domain/auth"
 	"disparago/internal/service"
 )
 
@@ -29,7 +30,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		})
 	}
 
-	token, claims, err := h.service.Login(req.Username, req.Password)
+	token, claims, err := h.service.Login(c.UserContext(), req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -45,24 +46,36 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"message": "login successful",
 		"data": fiber.Map{
-			"token":      token,
-			"username":   claims.Username,
-			"role":       claims.Role,
-			"expires_at": claims.ExpiresAt,
+			"user_id":      claims.UserID,
+			"company_id":   claims.CompanyID,
+			"company_name": claims.CompanyName,
+			"token":        token,
+			"username":     claims.Username,
+			"display_name": claims.DisplayName,
+			"role":         claims.Role,
+			"expires_at":   claims.ExpiresAt,
 		},
 	})
 }
 
 func (h *AuthHandler) Me(c *fiber.Ctx) error {
+	role, _ := c.Locals("auth_role").(authdomain.Role)
+	userID, _ := c.Locals("auth_user_id").(int64)
+	companyID, _ := c.Locals("auth_company_id").(int64)
+	companyName, _ := c.Locals("auth_company_name").(string)
 	username, _ := c.Locals("auth_username").(string)
-	role, _ := c.Locals("auth_role").(string)
+	displayName, _ := c.Locals("auth_display_name").(string)
 	expiresAt, _ := c.Locals("auth_expires_at").(string)
 
 	return c.JSON(fiber.Map{
 		"data": fiber.Map{
-			"username":   username,
-			"role":       role,
-			"expires_at": expiresAt,
+			"user_id":      userID,
+			"company_id":   companyID,
+			"company_name": companyName,
+			"username":     username,
+			"display_name": displayName,
+			"role":         role,
+			"expires_at":   expiresAt,
 		},
 	})
 }

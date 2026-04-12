@@ -5,15 +5,37 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"disparago/internal/app"
+	"disparago/internal/platform/migrations"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		postgresURL := os.Getenv("POSTGRES_URL")
+		if postgresURL == "" {
+			log.Fatal("POSTGRES_URL is required for migrations")
+		}
+
+		workdir, err := os.Getwd()
+		if err != nil {
+			log.Fatalf("resolve working directory: %v", err)
+		}
+
+		migrationsDir := filepath.Join(workdir, "migrations")
+		if err := migrations.Run(ctx, postgresURL, migrationsDir); err != nil {
+			log.Fatalf("run migrations: %v", err)
+		}
+
+		log.Println("migrations applied successfully")
+		return
+	}
 
 	application, err := app.New(ctx)
 	if err != nil {

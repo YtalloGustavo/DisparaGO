@@ -5,6 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	authdomain "disparago/internal/domain/auth"
 	"disparago/internal/service"
 )
 
@@ -25,7 +26,11 @@ func Protected(authService *service.AuthService) fiber.Handler {
 			return unauthorized(c)
 		}
 
+		c.Locals("auth_user_id", claims.UserID)
+		c.Locals("auth_company_id", claims.CompanyID)
+		c.Locals("auth_company_name", claims.CompanyName)
 		c.Locals("auth_username", claims.Username)
+		c.Locals("auth_display_name", claims.DisplayName)
 		c.Locals("auth_role", claims.Role)
 		c.Locals("auth_expires_at", claims.ExpiresAt.Format(timeLayout))
 		return c.Next()
@@ -34,8 +39,8 @@ func Protected(authService *service.AuthService) fiber.Handler {
 
 func RequireRole(role string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		currentRole, _ := c.Locals("auth_role").(string)
-		if currentRole != role {
+		currentRole, _ := c.Locals("auth_role").(authdomain.Role)
+		if string(currentRole) != role {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 				"error": "forbidden",
 			})

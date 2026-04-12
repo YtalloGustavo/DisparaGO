@@ -32,19 +32,21 @@ func New(
 	campaignHandler := handlers.NewCampaignHandler(campaignService)
 	instanceSettingsHandler := handlers.NewInstanceSettingsHandler(instanceSettingsService)
 	authHandler := handlers.NewAuthHandler(authService)
+	integrationHandler := handlers.NewIntegrationHandler(authService, campaignService)
 	webhookHandler := handlers.NewWebhookHandler(webhookService, instanceSettingsService)
 	dashboardHandler := handlers.NewDashboardHandler()
 
 	app.Static("/assets", filepath.Join(dashboardHandler.DistDir(), "assets"))
 
-	routes.Register(app, authService, healthHandler, authHandler, campaignHandler, instanceSettingsHandler, webhookHandler, dashboardHandler)
+	routes.Register(app, cfg.InternalAPIKey, authService, healthHandler, authHandler, integrationHandler, campaignHandler, instanceSettingsHandler, webhookHandler, dashboardHandler)
 
 	return app
 }
 
 type AppConfig struct {
-	Name         string
-	PublicURL    string
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
+	Name           string
+	PublicURL      string
+	InternalAPIKey string
+	ReadTimeout    time.Duration
+	WriteTimeout   time.Duration
 }

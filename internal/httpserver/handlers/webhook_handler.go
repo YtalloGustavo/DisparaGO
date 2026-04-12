@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -33,21 +34,28 @@ func NewWebhookHandler(service *service.WebhookService, settingsService *service
 }
 
 func (h *WebhookHandler) Evolution(c *fiber.Ctx) error {
-	return h.processEvolution(c, "")
+	return h.processEvolution(c, "", "")
 }
 
 func (h *WebhookHandler) EvolutionForInstance(c *fiber.Ctx) error {
-	return h.processEvolution(c, c.Params("instanceID"))
+	return h.processEvolution(c, c.Params("companyID"), c.Params("instanceID"))
 }
 
-func (h *WebhookHandler) processEvolution(c *fiber.Ctx, instanceID string) error {
+func (h *WebhookHandler) processEvolution(c *fiber.Ctx, companyRaw string, instanceID string) error {
 	if instanceID != "" {
+		companyID, err := strconv.ParseInt(companyRaw, 10, 64)
+		if err != nil || companyID <= 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "invalid company id",
+			})
+		}
+
 		token := c.Query("token")
 		if token == "" {
 			token = c.Get("X-DisparaGO-Webhook-Token")
 		}
 
-		if err := h.settingsService.ValidateWebhookToken(c.UserContext(), instanceID, token); err != nil {
+		if err := h.settingsService.ValidateWebhookToken(c.UserContext(), companyID, instanceID, token); err != nil {
 			status := fiber.StatusUnauthorized
 			if errors.Is(err, service.ErrInvalidInstanceSettings) {
 				status = fiber.StatusForbidden

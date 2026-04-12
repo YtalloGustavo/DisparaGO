@@ -29,7 +29,8 @@ WORKDIR /app
 
 COPY --from=builder /disparago /usr/local/bin/disparago
 COPY --from=web-builder /web/dist /app/web/dist
+COPY migrations /app/migrations
 
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/disparago"]
+ENTRYPOINT ["sh", "-c", "disparago migrate && exec disparago"]

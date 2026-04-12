@@ -1,0 +1,26 @@
+# Contexto Geral e Propósito
+Este projeto é o `DisparaGO`, uma aplicação web de disparo em massa de campanhas via WhatsApp, operando de forma autônoma e descentralizada em relação aos sistemas principais do usuário.
+- **Backend:** Go (Golang) com o framework de roteamento Fiber.
+- **Banco de Dados:** PostgreSQL e fila via Redis.
+- **Integração WhatsApp:** Provider EvolutionGO (consumido via HTTP e Webhooks).
+- **Frontend:** React SPA (JavaScript puro) rodando em Vite na pasta `web/`.
+
+# Regras de Desenvolvimento (Backend)
+1. **Estrutura**: Siga a arquitetura de Domain-Driven-Design orientada pelas pastas principais:
+   - `cmd/api`: Ponto de entrada (main.go).
+   - `internal/domain`: Suas entidades e tipos (Sem bibliotecas externas).
+   - `internal/service`: Contém toda a lógica e orquestração.
+   - `internal/worker`, `internal/httpserver`, `internal/repository`: Implementações limpas chamando os *services*.
+2. **Migrations**: NUNCA altere arquivos de migration antigos. Sempre crie um novo para atualizações do banco.
+3. **Escalabilidade & Anti-ban**: O objetivo core do backend é prevenir o congestionamento. Jobs e Workers devem respeitar Rate-Limits, Concorrência por Instância e injetar Random-Delays (`min_delay_ms` / `max_delay_ms`) antes de empurrar o pedido para o EvolutionGO.
+4. **Logs e Falhas**: Operações de rede devem englobar lógicas de Retry, garantindo persistência de erro (como `transiente` ou `permanente`) nas mensagens de campanha.
+
+# Regras de Desenvolvimento (Frontend - `/web`)
+1. **Tech Stack**: React + Vite + Javascript (Use componentes .jsx e Javascript vanilla Moderno).
+2. **Design UI/UX**: Use design "Premium", moderno, com glassmorphism onde for bom uso, paleta com coerência sólida (verde escuro / beges clássicos), animações suaves usando CSS Vanilla e bom feedback visual interativo. Não adicione Tailwind sem permissão expressa.
+3. Todo pacote Node (NPM) deverá ser rodado dentro do diretório `/web`.
+
+# Restrições como Assistente
+- Pense em modularização sempre que resolver problemas.
+- Mantenha referências explícitas: Não dê suposições em variáveis de ambiente, garanta a integridade do `.env`.
+- Não utilize referências a pacotes de envio/whatsapp antigos e desencorajados (tipo Whatsmeow diretamente), apenas a integração HTTP para o EvolutionGO previamente descrita.

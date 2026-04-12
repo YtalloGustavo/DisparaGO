@@ -1,9 +1,9 @@
 package service
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -11,75 +11,118 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"disparago/internal/config"
+	authdomain "disparago/internal/domain/auth"
+	"disparago/internal/repository"
 )
 
 var (
 	ErrInvalidCredentials = errors.New("credenciais invalidas")
 	ErrInvalidToken       = errors.New("token invalido")
+	ErrInactiveUser       = errors.New("usuario inativo")
 )
 
 type AuthService struct {
-	users    []authUser
-	secret   []byte
-	tokenTTL time.Duration
+	repository *repository.AuthRepository
+	cfg        config.AuthConfig
+	secret     []byte
+	tokenTTL   time.Duration
 }
 
 type AuthClaims struct {
-	Username  string    `json:"username"`
-	Role      string    `json:"role"`
-	IssuedAt  time.Time `json:"issued_at"`
-	ExpiresAt time.Time `json:"expires_at"`
+	UserID      int64           `json:"user_id"`
+	CompanyID   int64           `json:"company_id"`
+	CompanyName string          `json:"company_name"`
+	Username    string          `json:"username"`
+	DisplayName string          `json:"display_name"`
+	Role        authdomain.Role `json:"role"`
+	IssuedAt    time.Time       `json:"issued_at"`
+	ExpiresAt   time.Time       `json:"expires_at"`
 }
 
-type authUser struct {
-	Username string
-	Password string
-	Role     string
+type SyncCompanyInput struct {
+	Name           string
+	ExternalSource string
+	ExternalID     string
 }
 
-func NewAuthService(cfg config.AuthConfig) *AuthService {
+type SyncUserInput struct {
+	CompanyID      *int64
+	Username       string
+	DisplayName    string
+	Password       string
+	Role           authdomain.Role
+	Active         bool
+	ExternalSource string
+	ExternalID     string
+}
+
+func NewAuthService(repository *repository.AuthRepository, cfg config.AuthConfig) *AuthService {
 	return &AuthService{
-		users: []authUser{
-			{
-				Username: cfg.OperatorUsername,
-				Password: cfg.OperatorPassword,
-				Role:     "operator",
-			},
-			{
-				Username: cfg.SuperadminUsername,
-				Password: cfg.SuperadminPassword,
-				Role:     "superadmin",
-			},
-		},
-		secret:   []byte(cfg.Secret),
-		tokenTTL: cfg.TokenTTL,
+		repository: repository,
+		cfg:        cfg,
+		secret:     []byte(cfg.Secret),
+		tokenTTL:   cfg.TokenTTL,
 	}
 }
 
-func (s *AuthService) Login(username, password string) (string, AuthClaims, error) {
-	username = strings.TrimSpace(username)
-
-	var matched *authUser
-	for i := range s.users {
-		user := &s.users[i]
-		if subtle.ConstantTimeCompare([]byte(username), []byte(user.Username)) == 1 &&
-			subtle.ConstantTimeCompare([]byte(password), []byte(user.Password)) == 1 {
-			matched = user
-			break
-		}
+func (s *AuthService) EnsureBootstrap(ctx context.Context) error {
+	company, err := s.UpsertCompany(ctx, SyncCompanyInput{
+		Name:           s.cfg.BootstrapCompanyName,
+		ExternalSource: "bootstrap",
+		ExternalID:     "default",
+	})
+	if err != nil {
+		return fmt.Errorf("bootstrap company: %w", err)
 	}
 
-	if matched == nil {
+	if _, err := s.UpsertUser(ctx, SyncUserInput{
+		CompanyID:   &company.ID,
+		Username:    s.cfg.OperatorUsername,
+		DisplayName: s.cfg.OperatorDisplayName,
+		Password:    s.cfg.OperatorPassword,
+		Role:        authdomain.RoleOperator,
+		Active:      true,
+	}); err != nil {
+		return fmt.Errorf("bootstrap operator: %w", err)
+	}
+
+	if _, err := s.UpsertUser(ctx, SyncUserInput{
+		Username:    s.cfg.SuperadminUsername,
+		DisplayName: s.cfg.SuperadminDisplayName,
+		Password:    s.cfg.SuperadminPassword,
+		Role:        authdomain.RoleSuperadmin,
+		Active:      true,
+	}); err != nil {
+		return fmt.Errorf("bootstrap superadmin: %w", err)
+	}
+
+	return nil
+}
+
+func (s *AuthService) Login(ctx context.Context, username, password string) (string, AuthClaims, error) {
+	username = strings.TrimSpace(username)
+	user, err := s.repository.FindUserByUsername(ctx, username)
+	if err != nil {
+		if errors.Is(err, repository.ErrAuthUserNotFound) {
+			return "", AuthClaims{}, ErrInvalidCredentials
+		}
+		return "", AuthClaims{}, err
+	}
+
+	if !user.Active {
+		return "", AuthClaims{}, ErrInactiveUser
+	}
+
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 		return "", AuthClaims{}, ErrInvalidCredentials
 	}
 
-	now := time.Now().UTC()
-	claims := AuthClaims{
-		Username:  matched.Username,
-		Role:      matched.Role,
-		IssuedAt:  now,
-		ExpiresAt: now.Add(s.tokenTTL),
+	claims, err := s.userClaims(ctx, user)
+	if err != nil {
+		return "", AuthClaims{}, err
 	}
 
 	token, err := s.sign(claims)
@@ -116,8 +159,71 @@ func (s *AuthService) Validate(token string) (AuthClaims, error) {
 		return AuthClaims{}, ErrInvalidToken
 	}
 
-	if claims.Username == "" || claims.Role == "" || time.Now().UTC().After(claims.ExpiresAt) {
+	if claims.UserID == 0 || claims.Username == "" || claims.Role == "" || time.Now().UTC().After(claims.ExpiresAt) {
 		return AuthClaims{}, ErrInvalidToken
+	}
+
+	return claims, nil
+}
+
+func (s *AuthService) UpsertCompany(ctx context.Context, input SyncCompanyInput) (authdomain.Company, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return authdomain.Company{}, fmt.Errorf("%w: company name is required", ErrInvalidCredentials)
+	}
+
+	return s.repository.UpsertCompany(ctx, repository.UpsertCompanyParams{
+		Name:           name,
+		ExternalSource: strings.TrimSpace(input.ExternalSource),
+		ExternalID:     strings.TrimSpace(input.ExternalID),
+	})
+}
+
+func (s *AuthService) UpsertUser(ctx context.Context, input SyncUserInput) (authdomain.User, error) {
+	username := strings.TrimSpace(input.Username)
+	displayName := strings.TrimSpace(input.DisplayName)
+	if username == "" {
+		return authdomain.User{}, fmt.Errorf("%w: username is required", ErrInvalidCredentials)
+	}
+	if displayName == "" {
+		displayName = username
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return authdomain.User{}, fmt.Errorf("hash password: %w", err)
+	}
+
+	return s.repository.UpsertUser(ctx, repository.UpsertUserParams{
+		CompanyID:      input.CompanyID,
+		Username:       username,
+		DisplayName:    displayName,
+		PasswordHash:   string(passwordHash),
+		Role:           input.Role,
+		Active:         input.Active,
+		ExternalSource: strings.TrimSpace(input.ExternalSource),
+		ExternalID:     strings.TrimSpace(input.ExternalID),
+	})
+}
+
+func (s *AuthService) userClaims(ctx context.Context, user authdomain.User) (AuthClaims, error) {
+	now := time.Now().UTC()
+	claims := AuthClaims{
+		UserID:      user.ID,
+		Username:    user.Username,
+		DisplayName: user.DisplayName,
+		Role:        user.Role,
+		IssuedAt:    now,
+		ExpiresAt:   now.Add(s.tokenTTL),
+	}
+
+	if user.CompanyID != nil {
+		claims.CompanyID = *user.CompanyID
+		company, err := s.repository.FindCompanyByID(ctx, *user.CompanyID)
+		if err != nil {
+			return AuthClaims{}, fmt.Errorf("load company: %w", err)
+		}
+		claims.CompanyName = company.Name
 	}
 
 	return claims, nil
