@@ -67,7 +67,7 @@ func New(ctx context.Context) (*App, error) {
 		InternalAPIKey: cfg.InternalAPI.Key,
 		ReadTimeout:    cfg.App.ReadTimeout,
 		WriteTimeout:   cfg.App.WriteTimeout,
-	}, authService, campaignService, instanceSettingsService, webhookService, healthHandler)
+	}, authService, campaignService, instanceSettingsService, webhookService, healthHandler, provider)
 	dispatchWorker := worker.NewDispatchWorker(log, campaignRepository, instanceSettingsService, consumer, provider, cfg.Humanizer, cfg.Retry)
 	campaignScheduler := worker.NewCampaignScheduler(log, campaignService, cfg.Scheduler)
 

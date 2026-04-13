@@ -12,6 +12,7 @@ import (
 	"disparago/internal/domain/campaign"
 	"disparago/internal/domain/message"
 	"disparago/internal/platform/database"
+	"disparago/internal/queue"
 )
 
 var ErrCampaignNotFound = errors.New("campaign not found")
@@ -58,6 +59,53 @@ type ClaimedScheduledCampaign struct {
 
 func NewCampaignRepository(db *database.Client) *CampaignRepository {
 	return &CampaignRepository{db: db}
+}
+
+func (r *CampaignRepository) ClaimDueRetryJobs(ctx context.Context, batchSize int) ([]queue.CampaignMessageJob, error) {
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+
+	rows, err := r.db.Pool.Query(ctx, `
+		WITH due AS (
+			SELECT m.id, m.campaign_id, c.instance_id, m.recipient_phone, m.message_content, m.attempt_count
+			FROM campaign_messages m
+			JOIN campaigns c ON c.id = m.campaign_id
+			WHERE m.status = 'pending'
+			  AND m.next_retry_at IS NOT NULL
+			  AND m.next_retry_at <= NOW()
+			  AND c.paused = false
+			  AND c.cancelled_at IS NULL
+			ORDER BY m.next_retry_at ASC
+			LIMIT $1
+			FOR UPDATE SKIP LOCKED
+		)
+		UPDATE campaign_messages m
+		SET next_retry_at = NULL,
+		    updated_at = NOW()
+		FROM due
+		WHERE m.id = due.id
+		RETURNING due.id::text, due.campaign_id::text, due.instance_id, due.recipient_phone, due.message_content, due.attempt_count
+	`, batchSize)
+	if err != nil {
+		return nil, fmt.Errorf("claim due retry jobs: %w", err)
+	}
+	defer rows.Close()
+
+	jobs := make([]queue.CampaignMessageJob, 0)
+	for rows.Next() {
+		var job queue.CampaignMessageJob
+		if err := rows.Scan(&job.MessageID, &job.CampaignID, &job.InstanceID, &job.Recipient, &job.Message, &job.AttemptCount); err != nil {
+			return nil, fmt.Errorf("scan due retry job: %w", err)
+		}
+		jobs = append(jobs, job)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate due retry jobs: %w", err)
+	}
+
+	return jobs, nil
 }
 
 func (r *CampaignRepository) Create(ctx context.Context, params CreateCampaignParams) (campaign.Campaign, []message.Message, error) {
@@ -430,13 +478,23 @@ func (r *CampaignRepository) ClaimDueScheduledCampaigns(ctx context.Context, bat
 	}
 	defer rows.Close()
 
-	claimed := make([]ClaimedScheduledCampaign, 0)
+	// Note: pgx connections cannot run a new query while an existing Rows is still open.
+	// We first collect claimed campaigns, then query their messages in a second pass.
+	claimedCampaigns := make([]campaign.Campaign, 0)
 	for rows.Next() {
 		item, err := scanCampaignRows(rows)
 		if err != nil {
 			return nil, err
 		}
+		claimedCampaigns = append(claimedCampaigns, item)
+	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate claimed campaigns: %w", err)
+	}
+
+	claimed := make([]ClaimedScheduledCampaign, 0, len(claimedCampaigns))
+	for _, item := range claimedCampaigns {
 		messageRows, err := tx.Query(ctx, `
 			SELECT id, campaign_id, recipient_phone, message_content, status, COALESCE(provider_message_id, ''), attempt_count,
 			       COALESCE(last_error, ''), next_retry_at, sent_at, delivered_at, read_at, failed_at, created_at, updated_at
@@ -474,14 +532,11 @@ func (r *CampaignRepository) ClaimDueScheduledCampaigns(ctx context.Context, bat
 			msgs = append(msgs, msg)
 		}
 		messageRows.Close()
+
 		claimed = append(claimed, ClaimedScheduledCampaign{
 			Campaign: item,
 			Messages: msgs,
 		})
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate claimed campaigns: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

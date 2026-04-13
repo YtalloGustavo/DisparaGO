@@ -10,6 +10,7 @@ import (
 	"disparago/internal/httpserver/handlers"
 	"disparago/internal/httpserver/routes"
 	"disparago/internal/service"
+	"disparago/internal/evolutiongo"
 )
 
 func New(
@@ -19,6 +20,7 @@ func New(
 	instanceSettingsService *service.InstanceSettingsService,
 	webhookService *service.WebhookService,
 	healthHandler *handlers.HealthHandler,
+	provider *evolutiongo.Client,
 ) *fiber.App {
 	app := fiber.New(fiber.Config{
 		AppName:      cfg.Name,
@@ -34,11 +36,12 @@ func New(
 	authHandler := handlers.NewAuthHandler(authService)
 	integrationHandler := handlers.NewIntegrationHandler(authService, campaignService)
 	webhookHandler := handlers.NewWebhookHandler(webhookService, instanceSettingsService)
+	providerHandler := handlers.NewProviderHandler(provider)
 	dashboardHandler := handlers.NewDashboardHandler()
 
 	app.Static("/assets", filepath.Join(dashboardHandler.DistDir(), "assets"))
 
-	routes.Register(app, cfg.InternalAPIKey, authService, healthHandler, authHandler, integrationHandler, campaignHandler, instanceSettingsHandler, webhookHandler, dashboardHandler)
+	routes.Register(app, cfg.InternalAPIKey, authService, healthHandler, authHandler, integrationHandler, campaignHandler, instanceSettingsHandler, webhookHandler, providerHandler, dashboardHandler)
 
 	return app
 }

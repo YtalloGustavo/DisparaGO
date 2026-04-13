@@ -18,6 +18,7 @@ func Register(
 	campaignHandler *handlers.CampaignHandler,
 	instanceSettingsHandler *handlers.InstanceSettingsHandler,
 	webhookHandler *handlers.WebhookHandler,
+	providerHandler *handlers.ProviderHandler,
 	dashboardHandler *handlers.DashboardHandler,
 ) {
 	app.Get("/health", healthHandler.Check)
@@ -51,6 +52,7 @@ func Register(
 	protected.Post("/campaigns/:id/resume", campaignHandler.Resume)
 	protected.Post("/campaigns/:id/reschedule", campaignHandler.Reschedule)
 	protected.Post("/campaigns/:id/cancel", campaignHandler.CancelScheduled)
+	protected.Get("/providers/evolution/instances", providerHandler.ListEvolutionInstances)
 
 	superadmin := protected.Group("/admin", middleware.RequireRole("superadmin"))
 	superadmin.Get("/companies/:companyID/instances/settings", instanceSettingsHandler.List)

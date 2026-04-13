@@ -71,6 +71,12 @@ func (w *DispatchWorker) Start() {
 		w.run(ctx)
 	}()
 
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		w.runRetrySweeper(ctx)
+	}()
+
 	w.log.Println("dispatch worker started")
 }
 
@@ -111,6 +117,45 @@ func (w *DispatchWorker) run(ctx context.Context) {
 
 		if err := w.handleJob(ctx, raw, job); err != nil {
 			w.log.Printf("worker handle job failed: message_id=%s err=%v", job.MessageID, err)
+		}
+	}
+}
+
+func (w *DispatchWorker) runRetrySweeper(ctx context.Context) {
+	// Recover retries that were scheduled via timers but lost due to restarts.
+	interval := w.retry.Delay
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	if interval > 10*time.Second {
+		interval = 10 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		jobs, err := w.repository.ClaimDueRetryJobs(ctx, 200)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			w.log.Printf("retry sweeper tick failed: %v", err)
+		}
+
+		for _, job := range jobs {
+			payload, err := json.Marshal(job)
+			if err != nil {
+				w.log.Printf("retry sweeper marshal job failed: message_id=%s err=%v", job.MessageID, err)
+				continue
+			}
+
+			if err := w.redisQueue.RequeueCampaignMessage(context.Background(), string(payload)); err != nil {
+				w.log.Printf("retry sweeper requeue failed: message_id=%s err=%v", job.MessageID, err)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }

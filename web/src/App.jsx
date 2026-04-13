@@ -185,6 +185,7 @@ function CampaignColumn({ title, subtitle, items, selectedId, onSelect }) {
                 <strong>{item.name}</strong>
                 <StatusChip status={item.status} />
               </div>
+              {item.company_id ? <p>Empresa {item.company_id}</p> : null}
               <p>Instancia {item.instance_id}</p>
               <p>Total {item.total_messages}</p>
               {item.status === "scheduled" ? (
@@ -208,6 +209,7 @@ function App() {
   const [authForm, setAuthForm] = useState({ username: "", password: "" });
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [evolutionInstances, setEvolutionInstances] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -227,12 +229,32 @@ function App() {
   const [adminSuccess, setAdminSuccess] = useState("");
   const [currentView, setCurrentView] = useState("operations");
   const selectedIdRef = useRef(null);
+  const externalCampaignRef = useRef("");
 
   const grouped = useMemo(() => splitCampaigns(campaigns), [campaigns]);
   const stats = useMemo(() => aggregateStats(campaigns), [campaigns]);
   const isSuperadmin = session?.role === "superadmin";
 
   useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      const token = params.get("token");
+      const externalCampaignId = params.get("external_campaign_id");
+
+      if (externalCampaignId) {
+        externalCampaignRef.current = String(externalCampaignId).trim();
+      }
+
+      if (token) {
+        saveSession({ token: String(token).trim() });
+        params.delete("token");
+        const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}${window.location.hash || ""}`;
+        window.history.replaceState({}, "", nextUrl);
+      }
+    } catch {
+      // ignore
+    }
+
     const stored = loadStoredSession();
     if (!stored?.token) {
       setCheckingAuth(false);
@@ -255,10 +277,12 @@ function App() {
       setCampaigns([]);
       setSelectedCampaign(null);
       setMessages([]);
+      setEvolutionInstances([]);
       return undefined;
     }
 
     refreshAll(session.token, true).catch(() => {});
+    loadEvolutionInstances(session.token).catch(() => {});
     const timer = window.setInterval(() => {
       refreshAll(session.token, false).catch(() => {});
     }, POLL_INTERVAL_MS);
@@ -277,6 +301,12 @@ function App() {
       setCampaigns(nextCampaigns);
 
       let nextSelectedId = selectedIdRef.current;
+      if (!nextSelectedId && externalCampaignRef.current) {
+        const match = nextCampaigns.find(
+          (item) => String(item.external_source_id || "").trim() === externalCampaignRef.current
+        );
+        if (match) nextSelectedId = match.id;
+      }
       if (!nextSelectedId && selectFirst && nextCampaigns.length) nextSelectedId = nextCampaigns[0].id;
       if (nextSelectedId && !nextCampaigns.some((item) => item.id === nextSelectedId)) {
         nextSelectedId = nextCampaigns[0]?.id || null;
@@ -312,6 +342,24 @@ function App() {
     } catch (err) {
       if (err.status === 401) return handleLogout("Sua sessao expirou.");
       setError(err.message);
+    }
+  }
+
+  async function loadEvolutionInstances(token = session?.token) {
+    if (!token) return;
+    try {
+      const response = await request("/api/v1/providers/evolution/instances", {}, token);
+      const items = response.data || [];
+      setEvolutionInstances(items);
+
+      // Se o usuario ainda nao escolheu instancia, sugere a primeira conectada.
+      if (!form.instanceId && items.length) {
+        const connected = items.find((item) => item.connected) || items[0];
+        setForm((current) => ({ ...current, instanceId: connected?.name || current.instanceId }));
+      }
+    } catch (err) {
+      // Nao bloqueia o fluxo. Apenas deixa o campo manual.
+      setEvolutionInstances([]);
     }
   }
 
@@ -576,7 +624,18 @@ function App() {
                   </label>
                   <label className="field">
                     <span>Instancia WhatsApp</span>
-                    <input value={form.instanceId} onChange={(event) => setForm((current) => ({ ...current, instanceId: event.target.value }))} placeholder="Ex.: servidoron_2_1" required />
+                    {evolutionInstances.length ? (
+                      <select value={form.instanceId} onChange={(event) => setForm((current) => ({ ...current, instanceId: event.target.value }))} required>
+                        <option value="" disabled>Selecione...</option>
+                        {evolutionInstances.map((item) => (
+                          <option key={item.id || item.name} value={item.name}>
+                            {item.name}{item.connected ? " (conectada)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input value={form.instanceId} onChange={(event) => setForm((current) => ({ ...current, instanceId: event.target.value }))} placeholder="Ex.: servidoron_2_1" required />
+                    )}
                   </label>
                   <label className="field full">
                     <span>Mensagem</span>
